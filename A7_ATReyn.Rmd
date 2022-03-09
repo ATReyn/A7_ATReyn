@@ -1,0 +1,246 @@
+---
+title: "A7_ATReyn"
+output:
+  html_notebook: default
+  pdf_document: default
+editor_options:
+  chunk_output_type: inline
+---
+
+**Github:** https://github.com/ATReyn/A7_ATReyn/
+
+### Setup
+
+Load libraries:
+```{r}
+
+library(ape)
+library(reshape2)
+library(ggplot2)
+library(ggtree)
+library(dplyr)
+
+
+```
+
+Load data:
+```{r}
+
+DragonNexus <- read.nexus.data("./Input/DragonMatrix.nex")
+
+# Examine the data
+tail(DragonNexus)
+names(DragonNexus)
+
+
+```
+
+Import premade weights:
+```{r}
+
+WeightsDat <- read.csv("./Input/Weights.csv")
+
+```
+
+### Apply Trait Weighting
+
+1. Create a single vector of weights
+```{r}
+
+# Isolate weight values from dataset
+Weights <- paste0(WeightsDat$Weight, collapse = "")
+
+# Split weights into vector
+Weights <- strsplit(Weights, split = "")[[1]]
+
+```
+
+
+2. Convert each letter to its corresponding weight value (e.g. A=10, B=11, etc.)
+```{r}
+
+# Convert weights to letter values
+WeightsNum <- rep(NA, length(Weights))
+for(i in 1:length(WeightsNum)){
+  if(Weights[i] %in% LETTERS){
+    WeightsNum[i] <- which(LETTERS == Weights[i]) + 9 # Add 9 to get weight values (A=10, B=11, etc.)
+  } else {
+    WeightsNum[i] <- Weights[i]
+  }
+}
+
+# Create list of weights
+WeightsNum <- as.numeric(WeightsNum)
+
+# Check to see if it is appropriate length (78)
+length(WeightsNum)
+
+
+```
+
+3. Multiply the weight value by the trait vector for each dragon
+```{r}
+
+# Slice object:
+WtDragonNexus <- DragonNexus # Make a new weighted data frame object
+
+# Multiply weight value by trait vector for each dragon
+for (i in 1:length(DragonNexus)){
+  RepWeight <- DragonNexus[[i]] == 1
+  WtDragonNexus[[i]][RepWeight] <- WeightsNum[RepWeight]
+  RepWeight <- NA
+}
+
+
+```
+
+4. Re-calculate our distance matrix
+```{r}
+
+# Modify objects
+WtDragonNexusDF <- data.frame(matrix(unlist(WtDragonNexus), ncol = length(DragonNexus[[1]]), byrow = T))
+
+row.names(WtDragonNexusDF) <- names(WtDragonNexus)
+
+WtDragonDist <- dist(WtDragonNexusDF, method = 'euclidean')
+
+# Create dist()
+WtDragonDistMat <- as.matrix(WtDragonDist)
+
+# Create dist matrix
+WtPDat <- melt(WtDragonDistMat)
+
+# Plot distance matrix
+ggplot(data = WtPDat, aes(x = Var1, y = Var2, fill = value)) + 
+  geom_tile() +
+  scale_fill_gradientn(colours = c("white", "blue", "green", "red")) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+
+```
+
+### Plotting the Tree
+
+```{r}
+
+# Minimal evolution (ME) setup
+WtDragonTreeME <- fastme.bal(WtDragonDist)
+
+# Neighbour-joining (NJ) setup
+WtDragonTreeNJ <- nj(WtDragonDist)
+
+# Compare circular trees
+ggtree(WtDragonTreeME, layout = "circular")
+ggtree(WtDragonTreeNJ, layout = "circular")
+
+```
+The Minimal Evolution method looks the best, so I will further format that tree.
+
+### Tree Formatting
+
+Creating a tree based on identity of dragons:
+```{r}
+
+# Parse out vector
+Country <- gsub("[0-9\\.]+([^X]+)X*", "\\1", WtDragonTreeME$tip.label) # Remove leading numbers
+
+# Group tip.labels by country
+CountryGroups <- split(WtDragonTreeME$tip.label, Country)
+
+# Use groupOTU to group dragons (Operational Taxonomic Unit--we assign taxonomic groups, may not be spp, cluster based on similarities)
+WtDTcol <- groupOTU(WtDragonTreeME, CountryGroups)
+
+# Change tip label names
+WtDTcol$tip.label <- paste(Country, seq(1:length(WtDTcol$tip.label)), sep = "")
+
+# New tree
+IDTree <- ggtree(WtDTcol, layout = "rectangular", aes(colour = group)) +
+  geom_tiplab(size = 2, aes(angle = 0)) +
+  scale_colour_discrete(name = "Identity",
+                      labels = c("Unknown", "American", "British", "DRAGON 1", "DRAGON 2", "DRAGON 3", 
+                                 "Dutch", "English", "FISH", "French", "German", "Greek", "Indian",
+                                 "Iranian", "Italian", "Japanese", "MAMMAL", "Russian", "SNAKE", "Spanish",
+                                 "Turkish", "Ukranian")) +
+  geom_point2(aes(subset = (node == 53)), shape = 17, size = 1, colour = "red") +  # Highlights my dragons
+  geom_point2(aes(subset = (node == 54)), shape = 17, size = 1, colour = "red") +
+  geom_point2(aes(subset = (node == 43)), shape = 17, size = 1, colour = "red")
+
+
+```
+
+Creating a tree based on clade:
+```{r}
+
+# Create list of nodes for clade grouping
+WtDTclade <- groupClade(WtDragonTreeME,.node = c(110, 134, 120))
+
+# Create tree
+CladeTree <- ggtree(WtDTclade,layout = "circular", aes()) + 
+  geom_cladelabel(node = 110, label = "Serpentidae", hjust = 0.15, offset.text = 4, fontsize = 3) + # Label clades
+  geom_cladelabel(node = 134, label = "Orientalia", hjust = 0.35, offset.text = 4, fontsize = 3) +
+  geom_cladelabel(node = 120, label = "Dracopteronidae", hjust = 0.55, 
+                  vjust = 4, offset.text = 4, fontsize = 3) +
+  geom_cladelabel(node = 83, label = "Wyvernidae", hjust = 0.6, offset.text = 4, fontsize = 3) +
+  geom_hilight(node = 110, fill = "gold", alpha = 0.2) + # Highlight clades
+  geom_hilight(node = 83, fill = "purple", alpha = 0.2) +
+  geom_hilight(node = 134, fill = "cyan", alpha = 0.2) + 
+  geom_hilight(node = 120, fill = "green", alpha = 0.2) +
+  geom_point2(aes(subset = (node == 53)), shape = 17, size = 3, colour = "red") + # Highlights my dragons
+  geom_point2(aes(subset = (node == 54)), shape = 17, size = 3, colour = "red") +
+  geom_point2(aes(subset = (node == 43)), shape = 17, size = 3, colour = "red")
+
+```
+
+### Discussion
+
+\n
+
+I have selected three dragons to include in a revised Dragon Phylogeny, as shown below.
+
+\n
+
+![ ](C:/Users/tripl/Documents/Coursework/5th Year/BIOL 432/Week 8/A7_ATReyn/Images/75Dragon01.jpg)
+
+**Dragon 1:** Fafnir, illustrated by [Kate Pfeilschiefter](https://images-wixmp-ed30a86b8c4ca887773594c2.wixmp.com/f/6567533a-dbb4-4800-b64b-9607f52d470b/d35g5yc-e001280d-10f0-4336-930f-1b443f0dcd0a.jpg/v1/fill/w_900,h_1361,q_75,strp/siegfried_kills_fafnir_by_katepfeilschiefter_d35g5yc-fullview.jpg?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1cm46YXBwOjdlMGQxODg5ODIyNjQzNzNhNWYwZDQxNWVhMGQyNmUwIiwiaXNzIjoidXJuOmFwcDo3ZTBkMTg4OTgyMjY0MzczYTVmMGQ0MTVlYTBkMjZlMCIsIm9iaiI6W1t7ImhlaWdodCI6Ijw9MTM2MSIsInBhdGgiOiJcL2ZcLzY1Njc1MzNhLWRiYjQtNDgwMC1iNjRiLTk2MDdmNTJkNDcwYlwvZDM1ZzV5Yy1lMDAxMjgwZC0xMGYwLTQzMzYtOTMwZi0xYjQ0M2YwZGNkMGEuanBnIiwid2lkdGgiOiI8PTkwMCJ9XV0sImF1ZCI6WyJ1cm46c2VydmljZTppbWFnZS5vcGVyYXRpb25zIl19.bx-eFxr5TOTZdN0KEQx60N0s6ICH7kapwcEyivrM-II).
+
+\n
+
+![ ](C:/Users/tripl/Documents/Coursework/5th Year/BIOL 432/Week 8/A7_ATReyn/Images/76Dragon02.jpg)
+
+**Dragon 2:** Ouroboros etching by [Lucas Jennis](https://libmedia.willamette.edu/hfma/omeka/files/original/461bc57d582c9059663aeab27968976b.jpg).
+
+\n
+
+![ ](C:/Users/tripl/Documents/Coursework/5th Year/BIOL 432/Week 8/A7_ATReyn/Images/77Dragon03.jpg)
+
+**Dragon 3:** Amphiptere by [Edward Topsell](https://en.wikipedia.org/wiki/Amphiptere#/media/File:Amphiptere.jpg).
+
+\n
+\n
+
+Based on my generated phylogeny, using the minimal evolution method, these dragons are relatively closely related despite their visual differences, fitting in with dragons of Japanese, Russian, Ukranian, French, Turkish, and American origin, as well as a morphologically typical "snake" group (Fig. 1). Oddly enough, Dragon 1 appears to be more closely related to Dragon 2, even though they have several striking differences, such as body coverings and the presence or absence of wings. Additionally, although all three new dragons being of European origin (Nordic, German, and English, respectively) they appear rather closely related to Japanese dragons, likely due to their elongate tails and serpentine bodies.
+
+```{r, echo = F}
+
+print(IDTree)
+
+```
+**Figure 1.** A minimal evolution phylogeny of dragons. Three newly added dragons are highlighted (red triangles).
+
+\n
+
+In fact, the three newly added dragons all belong to the same clade, the Dracopternidae (Fig. 2). Named for the winged dragons that are found within this clade, the Dracopternidae contains multiple accounts of independent evolutions of wings, with some dragon species exhibit the highly conserved trait of being wingless. For example, both Dragon 2 and Dragon 3 would have had to evolve wings independently of one another, as their last common ancestor would have been wingless.
+
+
+```{r, echo = F}
+
+print(CladeTree)
+
+```
+
+**Figure 2.** A minimal evolution phylogeny depicting the four major clades of dragons. Three newly added dragons are highlighted (red triangles).
+
+\n
+
+In contrast to the original Dragon Phylogeny, Wyvernidae and Dracoversidae are much more closely related groups, and thus species belonging to Dracoversidae have been reclassified as Wyvernidae. 
+
